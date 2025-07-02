@@ -1,0 +1,1231 @@
+---
+title: "ProjectQCB"
+author: "Caterina"
+date: "2025-03-13"
+output: html_document
+---
+#Packages
+```{r}
+install.packages("BiocManager") 
+BiocManager::install("GEOquery") 
+BiocManager::install("useful")
+
+```
+
+#Library
+```{r}
+setwd("~/Trento/UNI/Advanced Data Analysis -Lauria")
+library("useful")
+library("GEOquery") 
+library(pROC)
+library(ggplot2)
+library(genefilter)
+library(randomForest)
+library(RColorBrewer)
+library(genefilter)
+library(randomForest)
+library(caret)
+library(ggplot2)
+library(RColorBrewer)
+library(MASS)
+library("GEOquery")
+library("glmnet")
+library("ROCR")
+library(caret)
+library(rScudo)
+library(igraph)
+library(gprofiler2)
+library("hgu133a.db")
+library("KEGGREST")
+library("KEGGgraph")
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+#install.packages("pathfindR")
+library("pathfindR")
+library(hgu133a.db)
+library(dplyr)
+library(dendextend)
+```
+
+
+#Load DATA
+```{r}
+geoD<- getGEO("GSE8401")
+geoD <- geoD[[1]]
+show(geoD)
+head(exprs(geoD))
+length(exprs(geoD))
+ex<- exprs(geoD)
+
+```
+
+#Look at the metadata
+```{r}
+metadata <- pData(geoD)
+head(metadata)
+unique(metadata$characteristics_ch1)
+```
+
+
+#Boxplot
+```{r}
+dim(ex)
+colnames(ex)
+#ex <- log(ex)
+boxplot((ex))
+str(ex)
+hist(as.vector(as.matrix(ex)), breaks = 50, main = "Histogram of ex") 
+sum(ex == 0, na.rm = TRUE)
+log_ex <- log1p(ex) 
+log_s_ex <- scale(log_ex)
+hist(as.vector(as.matrix(log_s_ex)), breaks = 50, main = "Histogram of log and scaled transofrmed ex")
+boxplot((log_s_ex))
+
+```
+
+#PCA
+```{r}
+pca <- prcomp(t(log_s_ex))
+summary(pca)
+screeplot(pca)
+grpcol <- ifelse(metadata$`characteristics_ch1` == "Genotype: primary tumor" , "blue", "red")
+#grpcol <- c(rep("blue",52), rep("red",31))
+plot(pca$x[,1], pca$x[,2], xlab="PCA1", ylab="PCA2", main="PCA for components 1&2", type="p", pch=10, col=grpcol)
+text(pca$x[,1], pca$x[,2], rownames(pca$x), cex=0.25) 
+legend("topright", 
+       legend = c("Primary Tumor", "Melanoma Metastasis"), 
+       col = c("blue", "red"), 
+       pch = 10 )
+
+
+plot(pca$x[,1], pca$x[,3], xlab="PCA1", ylab="PCA3", main="PCA for components 1&3", type="p", pch=10, col=grpcol)
+text(pca$x[,1], pca$x[,3], rownames(pca$x), cex=0.25) 
+legend("topright", 
+       legend = c("Primary Tumor", "Melanoma Metastasis"), 
+       col = c("blue", "red"), 
+       pch = 10 )
+
+
+pca <- prcomp(t(log_s_ex))
+summary(pca)
+screeplot(pca)
+# Get variance explained
+variance <- pca$sdev^2
+pct_variance <- variance / sum(variance) * 100
+
+# Plot scree plot (bars)
+screeplot(pca, type = "barplot", main = "Scree Plot")
+
+# Overlay a line following the variance trend
+lines(pct_variance, type = "o", col = "red", lwd = 2, pch = 19)
+# Define base colors for primary/metastasis
+grpcol <- ifelse(metadata$`characteristics_ch1` == "Genotype: primary tumor", "blue", "red")
+
+# Identify samples to highlight
+highlight_samples <- c("GSM207952", "GSM207960", "GSM207998", "GSM207999", 
+                      "GSM207997", "GSM207930", "GSM207952")
+highlight_samples2 <- c("GSM208006", "GSM208007", "GSM207994")
+
+# Create final color vector (start with primary/met colors)
+final_col <- grpcol
+
+# Apply highlight colors (these will override the primary/met colors)
+final_col[rownames(pca$x) %in% highlight_samples] <- "darkorange"  # Group 1 - orange
+final_col[rownames(pca$x) %in% highlight_samples2] <- "darkgreen"  # Group 2 - green
+
+# Create point types (highlighted samples get different shapes)
+point_types <- ifelse(rownames(pca$x) %in% c(highlight_samples, highlight_samples2), 17, 16)
+
+# Create point sizes (highlighted samples are larger)
+point_sizes <- ifelse(rownames(pca$x) %in% c(highlight_samples, highlight_samples2), 1.8, 1)
+
+# Plot PCA 1 vs 2
+
+png("pca_plot_2.png", width=3000, height=2000, res=300)
+plot(pca$x[,1], pca$x[,2], 
+     xlab = "PCA1", ylab = "PCA2", 
+     main = "PCA for components 1&2", 
+     col = final_col,
+     pch = point_types,
+     cex = point_sizes)
+
+# Add labels for highlighted samples (group 1 - orange)
+text(pca$x[highlight_samples,1], pca$x[highlight_samples,2], 
+     highlight_samples, cex = 0.7, pos = 4, col = "darkorange")
+
+# Add labels for highlighted samples (group 2 - green)
+text(pca$x[highlight_samples2,1], pca$x[highlight_samples2,2], 
+     highlight_samples2, cex = 0.7, pos = 4, col = "darkgreen")
+
+# Add comprehensive legend
+legend("bottomleft", 
+       legend = c("Primary Tumor", "Melanoma Metastasis", 
+                 "Misclassified Primary ", "Misclassified Metastasis"),
+       col = c("blue", "red", "darkorange", "darkgreen"),
+       pch = c(16, 16, 17, 17),
+       pt.cex = c(1, 1, 1.8, 1.8))
+dev.off()  # Important! Closes the graphics device
+
+```
+
+
+#Kmeans
+```{r}
+k <- 2
+kmeans_results <- kmeans(t(log_s_ex), centers = k)
+table(kmeans_results$cluster, metadata$`characteristics_ch1`)
+plot(kmeans_results , data = t(log_s_ex)) +geom_text(aes(label = metadata$`characteristics_ch1`), ,hjust=0,vjust=0 )
+
+
+```
+#K-MEANS
+```{r}
+
+
+k <- 2
+kmeans_results <- kmeans(t(log_s_ex), centers = k)
+table(kmeans_results$cluster, metadata$`characteristics_ch1`)
+cluster_df <- data.frame(
+  PC1 = prcomp(t(log_s_ex))$x[,1],  # Extract PC1
+  PC2 = prcomp(t(log_s_ex))$x[,2],  # Extract PC2
+  Cluster = factor(kmeans_results$cluster), 
+  Condition = factor(metadata$`characteristics_ch1`)
+)
+ggplot(cluster_df, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = Condition, shape = Cluster), size = 3) +  # Color by metadata, shape by cluster
+  theme_minimal() +
+  labs(title = "K-Means Clustering ", 
+       color = "Condition", 
+       shape = "Cluster")
+table(kmeans_results$cluster, metadata$characteristics_ch1)
+
+#save the graph in high resolution
+ggsave("kmeans_pca_plot.png", width = 10, height = 8, dpi = 300)
+
+```
+```{r}
+# Get misclassified sample IDs
+misclassified_met <- rownames(metadata)[which(
+  kmeans_results$cluster == 2 & 
+  metadata$`characteristics_ch1` == "Genotype: melanoma metastasis"
+)]
+misclassified_primary <- rownames(metadata)[which(
+  kmeans_results$cluster == 1 & 
+  metadata$`characteristics_ch1` == "Genotype: primary tumor"
+)]
+
+# Check their positions in PCA space
+pca_scores <- pca$x[, 1:2]  # PC1 and PC2 scores
+misclassified_pca <- pca_scores[c(hc_mis_met, hc_mis_primary), ]
+
+# Plot with highlights
+ggplot(cluster_df, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = Condition, shape = Cluster), alpha = 0.6) +
+  geom_point(
+    data = subset(cluster_df, rownames(cluster_df) %in% c(hc_mis_met, misclassified_primary)),
+    aes(x = PC1, y = PC2), color = "black", size = 3, shape = 1
+  ) +
+    geom_text_repel(
+    data = subset(cluster_df, rownames(cluster_df) %in% c(hc_mis_met, misclassified_primary)),
+    aes(label = rownames(subset(cluster_df, rownames(cluster_df) %in% c(hc_mis_met, misclassified_primary)))),
+    box.padding = 0.5,
+    point.padding = 0.2,
+    size = 3
+  ) 
+  labs(title = "Misclassified Samples in PCA Space") +
+  theme_minimal()
+  
+ggplot(cluster_df, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = Condition, shape = Cluster), alpha = 0.6) +
+  # Highlight GSM207952 with a larger black circle and red border
+  geom_point(
+    data = subset(cluster_df, rownames(cluster_df) == "GSM207952"),
+    aes(x = PC1, y = PC2),
+    color = "red",    # Border color
+    size = 4,         # Larger size
+    shape = 1,        # Hollow circle
+    stroke = 1.5      # Thicker border
+  ) +
+  # Optional: Add a label only for GSM207952
+  geom_text_repel(
+    data = subset(cluster_df, rownames(cluster_df) == "GSM2079"),
+    aes(label = "GSM207952"),
+    box.padding = 0.5,
+    point.padding = 0.3,
+    size = 3,
+    color = "red"     # Match label color to highlight
+  ) +
+  labs(title = "PCA Plot with Highlighted Sample (GSM207952)") +
+  theme_minimal()
+  
+
+
+# Highlight ONLY the samples in 'a' (misclassified by both methods)
+ggplot(cluster_df, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = Condition, shape = Cluster), alpha = 0.6) +
+  geom_point(
+    data = subset(cluster_df, rownames(cluster_df) %in% a),  # Only samples in 'a'
+    aes(x = PC1, y = PC2), 
+    color = "black",          # Outline color
+    size = 4,                # Slightly larger
+    shape = 1,               # Hollow circle            # Thicker border
+  ) +
+  geom_text_repel(
+    data = subset(cluster_df, rownames(cluster_df) %in% a),
+    aes(label = rownames(subset(cluster_df, rownames(cluster_df) %in% a))),
+    box.padding = 0.5,
+    point.padding = 0.2,
+    size = 3
+  ) 
+#save the plot in high resolution
+ggsave("kmeans_pca_plot_misclassified.png", width = 10, height = 8, dpi = 300)
+```
+
+
+
+
+
+#Hierarchical Clustering 
+```{r}
+dist_matrix <- dist(t(log_s_ex) , method = "euclidean")  
+hc_result <- hclust(dist_matrix, method = "ward.D2")  
+k <- 2
+groups <- cutree(hc_result, k = k)
+table(groups)
+
+# Plot dendrogram with rectangles
+plot(hc_result, hang = -1, labels = FALSE)  # Changed from '<-' to '='
+rect.hclust(hc_result, k = 2, border = 2)  # Simplified parameters
+
+# Create colored dendrogram
+dend <- as.dendrogram(hc_result)
+condition_colors <- ifelse(metadata$characteristics_ch1 == "Genotype: primary tumor", "blue", "red")
+labels_colors(dend) <- condition_colors[order.dendrogram(dend)] 
+dend <- dend %>% set("labels_cex", 0.3)
+plot(dend, main = "Case/Control Dendrogram",
+     xlab = "samples")
+legend(x = "topright",
+       legend = c("Primary tumor", "Metastasis"),  # Changed to match your color scheme
+       pch = 15,
+       col = c("blue", "red"))  # Corrected order to match your ifelse statement
+
+
+
+# Compare with k-means misclassifications
+hc_misclassified_met <- rownames(metadata)[which(
+  groups == 1 & 
+  metadata$characteristics_ch1 == "Genotype: melanoma metastasis"
+)]
+
+hc_misclassified_primary <- rownames(metadata)[which(
+  groups == 2 & 
+  metadata$characteristics_ch1 == "Genotype: primary tumor"
+)]
+
+# Check overlap with k-means misclassifications
+list(
+  "Metastases misclassified in both methods" = intersect(misclassified_met, hc_misclassified_met),
+  "Primaries misclassified in both methods" = intersect(misclassified_primary, hc_misclassified_primary)
+)
+
+
+library(aricode)     # For ARI
+library(dendextend)  # For dendrogram plotting
+
+# --- Input Data ---
+# log_s_ex: Your normalized expression matrix (genes x samples)
+# metadata: Contains ground truth labels in 'characteristics_ch1'
+
+# Define methods to test
+distance_methods <- c("euclidean", "manhattan", "maximum", "canberra", "binary", "minkowski")
+hc_methods <- c("ward.D2", "complete", "average", "single", "centroid", "mcquitty")
+
+# Ground truth labels (1 = Primary Tumor, 2 = Metastasis)
+true_labels <- ifelse(metadata$characteristics_ch1 == "Genotype: primary tumor", 1, 2)
+
+# Initialize results table
+results <- expand.grid(
+    Distance = distance_methods,
+    Method = hc_methods,
+    ARI = NA
+)
+
+# --- Evaluate All Combinations ---
+for (i in 1:nrow(results)) {
+    dist_matrix <- dist(t(log_s_ex), method = results$Distance[i])
+    hc_result <- hclust(dist_matrix, method = results$Method[i])
+    pred_clusters <- cutree(hc_result, k = 2)  # Assuming 2 clusters
+    results$ARI[i] <- ARI(true_labels, pred_clusters)
+}
+
+# Rank results (best ARI first)
+results <- results[order(-results$ARI), ]
+print(results)
+
+# Save results
+write.csv(results, "clustering_results_ARI.csv", row.names = FALSE)
+
+# --- Plot Best Dendrogram ---
+best_row <- which.max(results$ARI)
+best_dist <- results$Distance[best_row]
+best_method <- results$Method[best_row]
+
+# Compute best clustering
+best_dist_matrix <- dist(t(log_s_ex), method = best_dist)
+best_hc <- hclust(best_dist_matrix, method = best_method)
+best_clusters <- cutree(best_hc, k = 2)
+
+# Color labels by ground truth
+dend <- as.dendrogram(best_hc)
+condition_colors <- ifelse(metadata$characteristics_ch1 == "Genotype: primary tumor", "blue", "red")
+labels_colors(dend) <- condition_colors[order.dendrogram(dend)]
+
+# Plot
+library(dendextend)
+
+dend <- dend %>% set("labels_cex", 0.5)  # adjust 0.5 to whatever size looks best
+
+plot(dend, 
+     main = paste0( "Distance: Maximum | Method : Average "),
+     xlab = "Samples", 
+     ylab = "Height",
+     cex.lab = 0.7)  # axis labels only
+
+legend("topright", 
+       legend = c("Primary Tumor", "Metastasis"), 
+       fill = c("blue", "red"))
+
+rect.hclust(best_hc, k = 2, border = "darkgray")
+
+
+
+hc_clusters <- cutree(best_hc, k = 2)
+hc_mis_met <- rownames(metadata)[hc_clusters == 1 & metadata$characteristics_ch1 == "Genotype: melanoma metastasis"]
+hc_mis_primary <- rownames(metadata)[hc_clusters == 2 & metadata$characteristics_ch1 == "Genotype: primary tumor"]
+list(
+  "Metastases misclassified in both methods" = intersect(misclassified_met, hc_mis_met),
+  "Primaries misclassified in both methods" = intersect(misclassified_primary, hc_mis_primary)
+)
+
+```
+
+```{r}
+# Set graphical parameters for better visualization
+par(mar = c(5, 4, 4, 2) + 0.1)  # Adjust margins
+
+# Create enhanced dendrogram plot
+plot(dend, 
+     main = paste0("Optimal Hierarchical Clustering\n",
+                  "ARI = ", round(results$ARI[best_row], 3), 
+                  " | Distance: ", best_dist, 
+                  " | Method: ", best_method),
+     xlab = "Samples (n=83)", 
+     ylab = "Cluster Height",
+     cex.main = 0.9,  # Slightly smaller title
+     cex.lab = 0.8,   # Axis label size
+     cex.axis = 0.7,  # Axis text size
+     axes = TRUE,
+     ylim = c(0, max(hc_result$height)*1.1))  # Add space at top
+
+# Add legend with improved positioning
+legend("topright", 
+       legend = c("Primary Tumor (n=31)", "Metastasis (n=52)"), 
+       fill = c("blue", "red"),
+       cex = 0.7,
+       bty = "n")  # No legend box
+
+# Highlight clusters
+rect.hclust(best_hc, k = 2, border = "darkgray", cluster = NULL)
+
+# Add sample count annotation
+text(x = 0, y = max(hc_result$height)*1.05, 
+     labels = paste("Cluster sizes:", 
+                   paste(table(hc_clusters), collapse = " vs "),
+     pos = 4, cex = 0.7)
+
+# Add misclassification information
+misclass_text <- paste(
+  sum(hc_clusters == 1 & metadata$characteristics_ch1 == "Genotype: melanoma metastasis"),
+  "metastases in primary cluster |",
+  sum(hc_clusters == 2 & metadata$characteristics_ch1 == "Genotype: primary tumor"),
+  "primaries in metastasis cluster"))
+text(x = 0, y = max(hc_result$height)*1.0, 
+     labels = misclass_text,
+     pos = 4, cex = 0.65, col = "darkred")
+```
+
+
+#Random Forest
+```{r}
+sample_names <- colnames(log_s_ex)  # GSM IDs from expression matrix
+metadata_samples <- metadata$geo_accession 
+group <- ifelse(metadata$characteristics_ch1[match(sample_names, metadata_samples)] == "Genotype: primary tumor", 
+               "Primary", "Metastatic")
+group <- factor(group)
+set.seed(123)
+rf <- randomForest(t(log_s_ex),as.factor(group), ntree = 1000)
+predict(rf, t(log_s_ex[, 1: 5]))
+plot(sort(rf$importance, decreasing=TRUE)[1:500])
+
+#save the plot in high resolution
+png("rf_importance_plot.png", width=3000, height=2000, res=300)
+plot(rf)
+dev.off()  # Important! Closes the graphics device
+
+
+
+probe.names <- rownames(rf$importance)
+top200 <- probe.names[order(rf$importance, decreasing=TRUE)[1:200]]
+#write.csv(top200, file = "probes-top200.txt", quote=FALSE, row.names = FALSE)
+
+
+
+
+importance_scores <- sort(rf$importance, decreasing = TRUE)
+
+# Plot with labels and reference lines
+# Plot importance scores with colored top 200 genes
+gene_colors <- ifelse(seq_along(importance_scores) <= 200, "forestgreen",
+                   ifelse(seq_along(importance_scores) <= 500, "red", 
+                          "gray60"))
+
+png("rf_importance_scores.png", width=3000, height=2000, res=300)
+plot(importance_scores, 
+     pch = 20,
+     col = ifelse(seq_along(importance_scores) <= 200, "forestgreen", "black"))
+abline(v = 500, col = "indianred", lty = 3, lwd = 1.5)
+
+text(x = 500, y = max(importance_scores)*0.7, 
+     labels = "500", pos = 4, col = "indianred")
+dev.off()  # Important! Closes the graphics device
+
+
+
+```
+
+
+
+
+```{r}
+# Look at variable importance
+imp.temp <- abs(rf$importance[,])
+t <- order(imp.temp,decreasing=TRUE)
+plot(c(1:nrow(log_s_ex)),imp.temp[t],log='x',cex.main=1.5,
+xlab='gene rank',ylab='variable importance',cex.lab=1.5,
+pch=16,main='ALL subset results')
+# Get subset of expression values for 25 most 'important' genes
+gn.imp <- names(imp.temp)[t]
+gn.25 <- gn.imp[1:25] # vector of top 25 genes, in order
+t <- is.element(rownames(log_s_ex),gn.25)
+log_subset_ex <-log_s_ex[t,] # matrix of expression values, not necessarily in order
+## Make a heatmap, with group differences obvious on plot
+
+hmcol <- colorRampPalette(brewer.pal(11,"PuOr"))(256)
+#colnames(log_subset_ex) <- group # This will label the heatmap columns
+csc <- rep(hmcol[50],30)
+csc[group=='Primary'] <- hmcol[200]
+# column side color will be purple for T and orange for B
+#heatmap(log_subset_ex, scale="row", col=hmcol, ColSideColors=csc)
+# Heatmap with rotated sample names
+par(mar = c(8, 4, 4, 2))  # Bottom margin to 8 lines
+
+group_colors <- c("Primary" = "skyblue", "Metastatic" = "salmon")
+ColSideColors <- group_colors[as.character(group)]
+heatmap(log_subset_ex, 
+        scale = "row", 
+        col = hmcol, 
+        ColSideColors = ColSideColors, 
+        labCol = colnames(log_subset_ex))
+dev.off()  # Important! Closes the graphics device
+#png("heatmap5.png", width=3000, height=2000, res=300)
+col_dist <- dist(t(log_subset_ex), method = "maximum")  # Maximum distance
+col_hclust <- hclust(col_dist, method = "average")  
+png("heatmap5.png", width=3000, height=2000, res=300)
+pheatmap(log_subset_ex,
+         cluster_cols = col_hclust,
+         cluster_rows = TRUE,
+         scale = "row",
+         color = colorRampPalette(c("blue", "white", "red"))(100),
+         annotation_col = data.frame(Group = group, 
+                                   row.names = colnames(log_subset_ex)),
+         annotation_colors = list(Group = c("Primary" = "skyblue", 
+                                          "Metastatic" = "salmon")), # Fix here
+         fontsize_row = 6,
+         fontsize_col = 5,
+         fontsize = 8,
+         annotation_names_col = FALSE)
+dev.off()
+
+```
+```{r}
+library(pheatmap)
+library(RColorBrewer)
+
+# 1. Prepare colors and data
+hmcol <- colorRampPalette(brewer.pal(11, "PuOr"))(256)
+group_colors <- c("Primary" = "skyblue", "Metastatic" = "salmon")
+
+# 2. Create unique sample names while preserving original labels
+original_colnames <- colnames(log_subset_ex)
+colnames(log_subset_ex) <- paste0(original_colnames, "_", 1:ncol(log_subset_ex))
+
+# 3. Create annotation data frame
+annotation_df <- data.frame(
+  Group = factor(group),
+  row.names = colnames(log_subset_ex)
+)
+
+# 4. Create the heatmap with original styling
+pheatmap(log_subset_ex,
+         cluster_cols = col_hclust,  # Your precomputed sample clustering
+         cluster_rows = TRUE,        # Let genes cluster by default (Euclidean + complete)
+         scale = "row",
+         color = colorRampPalette(c("blue", "white", "red"))(100),
+         annotation_col = data.frame(Group = group, 
+                                   row.names = colnames(log_subset_ex)) ,
+         fontsize_row = 6,   # Gene name size
+         fontsize_col = 5,   # Sample name size
+         fontsize = 8,       # General text size
+         annotation_names_col = FALSE)  # Simpler group legend
+
+```
+
+
+
+
+#SUBSETTING the  expression dataset for p-val < 0.05
+```{r}
+sample_names <- colnames(log_s_ex)  # GSM IDs from expression matrix
+metadata_samples <- metadata$geo_accession  # GSM IDs from metadata
+all(sample_names %in% metadata_samples)  # Should return TRUE
+table(group)
+f <- factor(group)
+tt_results <- rowttests(log_s_ex, f)
+keepers <- which(tt_results$p.value < 0.05)  # Using p-value < 0.1 as in your example
+ex_subset <- log_s_ex[keepers, ]
+```
+
+#Training LDA and RF without CROSS-VALIDATION
+```{r}
+# 2. Prepare data for modeling (transpose and add group)
+tex3 <- t(ex_subset)  # Transpose to samples-as-rows
+dat <- cbind(as.data.frame(tex3), f)
+colnames(dat)[ncol(dat)] <- "GROUP"  # Rename the group column
+
+# 3. Set up training control and metric (as in your example)
+control <- trainControl(method = "cv", number = 10)
+metric <- "Accuracy"
+
+# 4. Train models with simple cross-validation
+set.seed(123)  # For reproducibility
+fit.lda <- train(GROUP ~ ., data = dat, method = "lda",
+                 metric = metric, trControl = control)
+
+fit.rf <- train(GROUP ~ ., data = dat, method = "rf",
+                metric = metric, trControl = control,
+                ntree = 1000)  # Using 1000 trees as in your RF example
+
+# 5. Compare results
+results <- resamples(list(LDA = fit.lda, RF = fit.rf))
+summary(results)
+
+# Plot accuracy
+ggplot(results) + 
+  labs(y = "Accuracy", title = "Model Comparison (10-fold CV)") +
+  theme_minimal()
+```
+
+
+#LDA GRAPH
+```{r}
+
+# Prepare data for modeling (transpose and add group)
+tex4 <- as.data.frame(t(ex_subset))
+tex4$GROUP <- group  
+tex4$GROUP <- factor(tex4$GROUP, levels = c("Primary", "Metastatic"))
+n.primary <- sum(group == "Primary")
+n.metastatic <- sum(group == "Metastatic")
+
+# Create train/test split (leaving 5 samples out from each group for testing)
+train.primary <- sample(which(group == "Primary"), n.primary - 15)
+train.metastatic <- sample(which(group == "Metastatic"), n.metastatic - 15)
+train <- c(train.primary, train.metastatic)
+test <- setdiff(1:length(group), train)
+
+# LDA model
+prior_p<- table(tex4$GROUP[train]) / length(train)
+mod <- lda(GROUP ~ ., data = tex4 , prior =c( 0.3333333 , 0.6666667 ), subset = train)
+
+# Train set visualization
+mod.values <- predict(mod, tex4[train, ])
+plot(mod.values$x[,1], ylab = "LDA Axis", main = "LDA - Training set")
+text(mod.values$x[,1], labels = as.numeric(tex4$GROUP[train]),
+     col = as.numeric(tex4$GROUP[train]) + 1, cex = 0.7)
+
+# Test set prediction
+preds <- predict(mod, tex4[test, ])
+plot(preds$x[,1], ylab = "LDA Axis", main = "LDA - test set")
+text(preds$x[,1], labels = as.numeric(tex4$GROUP[test]),
+     col = as.numeric(tex4$GROUP[test]) + 1, cex = 0.7)
+print(preds$class)
+confusion_matrix <- table(Predicted = preds$class, Actual = tex4$GROUP[test])
+print(confusion_matrix)
+
+# Convert GROUP to binary numeric (0/1)
+response_num <- as.numeric(tex4$GROUP[test]) - 1  # Converts to 0 and 1
+
+# Use the posterior probability for the "positive" class (e.g., "Metastatic")
+roc_lda <- roc(response = response_num,
+               predictor = preds$posterior[,"Metastatic"])  # Use correct class name
+
+plot(roc_lda, main = "ROC Curve for LDA")
+print(auc(roc_lda))
+
+
+plot_data <- data.frame(
+  LD1 = preds$x[,1],  # First discriminant axis
+  Group = tex4$GROUP[test],  # Actual groups
+  Predicted = preds$class  # Predicted groups
+)
+
+
+plot(preds$x[,1],
+     col = as.numeric(tex4$GROUP[test]) + 1,
+     pch = ifelse(preds$class == tex4$GROUP[test], 19, 4),
+     main = "LDA - Test Set Predictions",
+     xlab = "Samples",
+     ylab = "LDA Axis")
+legend("topright", 
+       legend = c("Correct", "Incorrect", "Primary", "Metastatic"),
+       pch = c(19, 4, NA, NA),
+       col = c("black", "black", "red", "green"),
+       cex = 0.7)
+abline(h = 0, lty = 2)
+
+
+# Get test sample names (assuming GSM IDs are row names)
+test_samples <- rownames(tex4)[test]  
+
+# Identify misclassified Primary samples (where prediction != actual)
+misclassified_idx <- which(preds$class != tex4$GROUP[test] & tex4$GROUP[test] == "Primary")
+
+# Extract GSM IDs of the 2 misclassified samples
+misclassified_GSM <- test_samples[misclassified_idx]
+print(misclassified_GSM)
+```
+#Lasso with class imbalance
+```{r}
+tex4 <- as.data.frame(t(ex_subset))
+tex4$GROUP <- factor(group, levels = c("Primary", "Metastatic"))
+
+# Convert to matrix and label vector
+dat2 <- as.matrix(tex4[, -ncol(tex4)])
+y <- as.numeric(tex4$GROUP) - 1  # Primary = 0, Metastatic = 1
+
+# Check class distribution
+n.primary <- sum(y == 0)
+n.metastatic <- sum(y == 1)
+cat("Primary:", n.primary, "\nMetastatic:", n.metastatic, "\n")
+
+# Standardize features
+dat2 <- scale(dat2)
+
+# Compute sample weights (inverse frequency)
+weights <- ifelse(y == 0, 1 / n.primary, 1 / n.metastatic)
+
+# Fit with glmnet and cross-validation (AUC-based)
+library(glmnet)
+set.seed(123)
+cfit <- cv.glmnet(
+  dat2, y, 
+  family = "binomial",
+  weights = weights,
+  nfolds = 10,
+  type.measure = "auc",
+  standardize = FALSE
+)
+plot(cfit)
+
+# Important features
+coefs <- coef(cfit, s = "lambda.min")
+important_features <- coefs[coefs[,1] != 0, , drop = FALSE]
+print(important_features)
+
+# Stratified train/test split
+set.seed(123)
+train_primary <- sample(which(y == 0), size = floor(0.7 * n.primary))
+train_metastatic <- sample(which(y == 1), size = floor(0.7 * n.metastatic))
+train <- c(train_primary, train_metastatic)
+test <- setdiff(1:nrow(dat2), train)
+
+# Fit model on training data
+fit_train <- glmnet(dat2[train,], y[train], 
+                   family = "binomial",
+                   weights = weights[train],
+                   standardize = FALSE)
+
+# CV on training data
+cfit_train <- cv.glmnet(dat2[train,], y[train],
+                       family = "binomial",
+                       weights = weights[train],
+                       nfolds = 10,
+                       type.measure = "auc",
+                       standardize = FALSE)
+plot(cfit_train)
+
+# Predict probabilities on test set
+pred_probs <- predict(cfit_train, dat2[test,], 
+                      s = "lambda.min", 
+                      type = "response")[, 1]
+
+# ROC Curve
+library(ROCR)
+pred_obj <- prediction(pred_probs, y[test])
+perf_obj <- performance(pred_obj, "tpr", "fpr")
+plot(perf_obj, colorize = TRUE, lwd = 2, main = "ROC Curve")
+abline(a = 0, b = 1, lty = 2)
+
+# AUC
+auc <- performance(pred_obj, "auc")@y.values[[1]]
+cat("AUC:", round(auc, 3), "\n")
+```
+
+
+
+
+#Training with CROSS-VALIDATION 
+```{r}
+# 6. Repeat with repeated cross-validation
+control_rep <- trainControl(method = "repeatedcv", 
+                           number = 10, 
+                           repeats = 5) #cosa fare per class imbalance 
+metric <- "Accuracy"
+
+set.seed(123)
+fit.lda.2 <- train(GROUP ~ ., data = dat, method = "lda",
+                   metric = metric, trControl = control_rep)
+
+set.seed(123)
+fit.rf.2 <- train(GROUP ~ ., data = dat, method = "rf",
+                  metric = metric, trControl = control_rep)
+
+results_rep <- resamples(list(LDA = fit.lda.2, RF = fit.rf.2))
+summary(results_rep)
+
+# Plot repeated CV results
+ggplot(results_rep) + 
+  labs(y = "Accuracy", title = "Model Comparison (10x10-fold CV)") +
+  theme_minimal()
+
+# 7. Variable importance (from random forest)
+rf_imp <- varImp(fit.rf.2)
+plot(rf_imp, top = 20, main = "Top 20 Important Genes (RF)")
+
+
+lda_imp <- varImp(fit.lda.2)
+plot(lda_imp, top = 20, main = "Top 20 Important Genes (LDA)")
+importance_scores <- lda_imp$importance$Metastatic
+names(importance_scores) <- rownames(lda_imp$importance)
+top_genes_lda <- sort(importance_scores, decreasing = TRUE)[1:200]
+top_genes_lda <- data.frame(Gene = names(top_genes_lda), Score = top_genes_lda)
+
+
+# 8. Confusion matrix for best model
+predictions <- predict(fit.rf.2, newdata = dat)
+confusionMatrix(predictions, dat$GROUP)
+
+#confusion matrix for LDA
+predictions_lda <- predict(fit.lda.2, newdata = dat)
+confusionMatrix(predictions_lda, dat$GROUP)
+
+
+```
+
+
+#Training -Lasso
+```{r}
+fit.lasso <- train(GROUP ~ ., data = dat, method = "glmnet",
+                  family = "binomial",
+                  tuneGrid = expand.grid(alpha = 1,
+                                       lambda = 10^seq(-3, 0, length.out = 100)),
+                  trControl = control_rep,
+                  metric = metric)
+
+#save the plot
+
+results <- resamples(list(Lasso = fit.lasso, LDA = fit.lda.2, RF = fit.rf.2))
+summary(results)
+
+# Plot accuracy
+png("plot_accuracy.png", width = 3000, height = 2000, res = 300)
+ggplot(results) + 
+  labs(y = "Accuracy", title = "Model Comparison (10-fold CV)") +
+  theme_minimal()
+dev.off()
+
+# Get the final model with optimal lambda
+final_model <- fit.lasso$finalModel
+
+# Get coefficients at the optimal lambda (using the lambda chosen by train)
+optimal_lambda <- fit.lasso$bestTune$lambda
+coef_values <- coef(final_model, s = optimal_lambda)
+coef_df <- data.frame(
+  gene = rownames(coef_values)[-1],  # remove intercept
+  coefficient = as.vector(coef_values[-1])  # remove intercept
+)
+coef_df <- coef_df[coef_df$coefficient != 0, ]
+coef_df <- coef_df[order(-abs(coef_df$coefficient)), ]
+top_200_genes <- head(coef_df, 200)
+top_200_genes$gene <- gsub("`", "", top_200_genes$gene)
+top_genes_lasso <- top_200_genes$gene
+
+top_25 <- top_200_genes %>% slice_max(abs(coefficient), n = 25)
+
+
+#save the plot
+
+ggplot(top_25, aes(x = reorder(gene, coefficient), y = coefficient, 
+                  fill = ifelse(coefficient > 0, "Positive Coefficients", "Negative Coefficients"))) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c("Positive Coefficients" = "firebrick", "Negative Coefficients" = "steelblue")) +
+  labs(title = "Core 25 Metastasis Biomarkers (Lasso λ=0.0327)",
+       subtitle = paste("Selected from", ncol(dat)-1, "tested features"),
+       x = "Gene", y = "Effect Size") +
+  coord_flip() +
+  theme_minimal()
+ggsave("lasso_top_25_genes.png", width = 10, height = 6, dpi = 300)
+
+overlapping_genes <- intersect(top_genes_lda$Gene, top_200_genes$gene)
+
+# Number of overlapping genes
+num_overlap <- length(overlapping_genes)
+
+# Percentage overlap (relative to Lasso's 25 genes)
+percent_overlap <- (num_overlap / length(top_genes_lasso)) * 100
+percent_overlap
+```
+
+
+#Training -SCUDO
+```{r}
+#SCUDO (Signature-based Clustering for Diagnostic and Prognostic Understanding , Uses top and bottom ranked genes to define a signature for each sample.)
+set.seed(123)
+inTrain <- createDataPartition(as.factor(group), list = FALSE)
+trainData <- log_ex[,inTrain]
+testData <- log_ex[, -inTrain]
+# 4. Apply rScudo analysis
+
+# Load rScudo
+
+
+# Training - Builds a signature for each sample in the training set.
+trainRes <- scudoTrain(trainData, groups = group[inTrain],
+                       nTop = 25, nBottom = 25, alpha = 0.05)
+trainRes
+
+# Inspect signatures 
+upSignatures(trainRes)[1:5, 1:5]
+consensusUpSignatures(trainRes)[1:5, ]
+
+# Network + plot -Creates a network: samples connected if their signatures are similar
+#Nodes = samples; Edges = similarity
+trainNet <- scudoNetwork(trainRes, N = 0.2)
+scudoPlot(trainNet, vertex.label = NA)
+
+# Testing -Applies trained SCUDO model to unseen (test) samples. 
+testRes <- scudoTest(trainRes, testData, group[-inTrain],
+                     nTop = 25, nBottom = 25)
+testNet <- scudoNetwork(testRes, N = 0.2)
+scudoPlot(testNet, vertex.label = NA)
+
+# Classification --Compares predicted vs. actual labels.
+classRes <- scudoClassify(trainData, testData, N = 0.25,
+                          nTop = 12, nBottom = 12,
+                          trainGroups = group[inTrain], alpha = 0.5)
+caret::confusionMatrix(classRes$predicted, group[-inTrain])
+
+
+
+# Clustering -Uses community detection to find groups in the test sample network.
+
+testNet <- igraph::delete_vertices(testNet, igraph::V(testNet)[degree(testNet) == 0])
+is_connected(testNet)
+testClust <- igraph::cluster_spinglass(testNet, spins = 2)
+plot(testClust, testNet, vertex.label = NA)
+
+scudoPlot(trainNet, vertex.label = NA)
+testClust <- igraph::cluster_spinglass(testNet, spins = 2)  
+plot(testClust, testNet)
+
+```
+
+
+
+
+
+#Functional enrichment Analysis
+```{r}
+probe.names <- rownames(rf$importance)
+top200 <- probe.names[order(rf$importance, decreasing=TRUE)[1:200]]
+
+#with top_genes_lda_clean
+gostres2 <- gost(query = top_genes_lda$Gene,
+ organism = "hsapiens", ordered_query = FALSE,
+ multi_query = FALSE, significant = TRUE, exclude_iea = FALSE,
+ measure_underrepresentation = FALSE, evcodes = FALSE,
+ user_threshold = 0.05, correction_method = "g_SCS",
+ domain_scope = "annotated", custom_bg = NULL,
+ numeric_ns = "", sources = NULL, as_short_link = FALSE)
+names(gostres2)
+head(gostres2$result)
+gostplot(gostres2, capped = TRUE, interactive = TRUE)
+#gostres2_r<- as.data.frame(gostres2$result)
+
+#with top200
+gostres3 <- gost(query = top200,
+ organism = "hsapiens", ordered_query = FALSE,
+ multi_query = FALSE, significant = TRUE, exclude_iea = FALSE,
+ measure_underrepresentation = FALSE, evcodes = FALSE,
+ user_threshold = 0.05, correction_method = "g_SCS",
+ domain_scope = "annotated", custom_bg = NULL,
+ numeric_ns = "", sources = NULL, as_short_link = FALSE)
+gostplot(gostres3, capped = TRUE, interactive = TRUE)
+
+gostres3_r <- as.data.frame(gostres3$result)
+
+
+#with top genes from lasso
+
+gostres4 <- gost(query = top_genes_lasso,
+ organism = "hsapiens", ordered_query = FALSE,
+ multi_query = FALSE, significant = TRUE, exclude_iea = FALSE,
+ measure_underrepresentation = FALSE, evcodes = FALSE,
+ user_threshold = 0.05, correction_method = "g_SCS",
+ domain_scope = "annotated", custom_bg = NULL,
+ numeric_ns = "", sources = NULL, as_short_link = FALSE)
+gostplot(gostres4, capped = TRUE, interactive = TRUE)
+
+gostres4_r <- as.data.frame(gostres4$result)
+
+
+
+gostres5 <- gost(query = overlapping_genes,
+ organism = "hsapiens", ordered_query = FALSE,
+ multi_query = FALSE, significant = TRUE, exclude_iea = FALSE,
+ measure_underrepresentation = FALSE, evcodes = FALSE,
+ user_threshold = 0.05, correction_method = "g_SCS",
+ domain_scope = "annotated", custom_bg = NULL,
+ numeric_ns = "", sources = NULL, as_short_link = FALSE)
+gostplot(gostres5, capped = TRUE, interactive = TRUE)
+
+gostres5_r <- as.data.frame(gostres5$result)
+
+```
+#ID TRANSLATION IN R and dataframe preparation for pathfindR
+```{r , warning=FALSE }
+f <- factor(group)
+tt_results <- rowttests(log_s_ex, f)
+
+# For RF probes
+matched_rows_rf <- tt_results[rownames(tt_results) %in% top200, ]
+significant_probes_rf <- rownames(matched_rows_rf)[matched_rows_rf$p.value < 0.05]
+
+# For LDA probes
+matched_rows_lda <- tt_results[rownames(tt_results) %in% top_genes_lda$Gene, ]
+significant_probes_lda <- rownames(matched_rows_lda)[matched_rows_lda$p.value < 0.05]
+
+#For LASSO probes
+matched_rows_lasso <- tt_results[rownames(tt_results) %in% top_genes_lasso, ]
+significant_probes_lasso <- rownames(matched_rows_lasso)[matched_rows_lasso$p.value < 0.05]
+length(significant_probes_lasso)
+
+# Get mapping for probe → gene symbol
+symbol_map <- hgu133aSYMBOL
+
+# Create list of mappings only for your top 200 probes
+probe2symbol <- as.list(symbol_map[significant_probes_rf])
+probe2symbol3 <- as.list(symbol_map[significant_probes_lda])
+probe2symbol4 <- as.list(symbol_map[significant_probes_lasso])
+
+# Convert list to a clean data frame
+probe_df_rf <- data.frame(
+  Gene.symbol = unname(unlist(probe2symbol[significant_probes_rf])),  
+  logFC = tt_results[significant_probes_rf, "statistic"],  # Get statistics for these probes
+  p.value = tt_results[significant_probes_rf, "p.value"],  # Get p-values for these probes
+  row.names = NULL,  # Don't use probe IDs as row names
+  stringsAsFactors = FALSE
+)
+
+
+probe_df_lda<- data.frame(
+  Gene.symbol = unname(unlist(probe2symbol3[significant_probes_lda])),  
+  logFC = tt_results[significant_probes_lda, "statistic"],  # Get statistics for these probes
+  p.value = tt_results[significant_probes_lda, "p.value"],  # Get p-values for these probes
+  row.names = NULL,  
+  stringsAsFactors = FALSE
+)
+
+probe_df_lasso <- data.frame(
+  Gene.symbol = unname(unlist(probe2symbol4[significant_probes_lasso])),  
+  logFC = tt_results[significant_probes_lasso, "statistic"],  
+  p.value = tt_results[significant_probes_lasso, "p.value"],  
+  row.names = NULL,  
+  stringsAsFactors = FALSE
+)
+
+
+probe_df_rf <- na.omit(probe_df_rf)
+probe_df_lda <- na.omit(probe_df_lda)
+probe_df_lasso <- na.omit(probe_df_lasso)
+#save to csv
+write.csv(probe_df_rf, file = "probe_df_rf.csv", row.names = FALSE)
+write.csv(probe_df_lda, file = "probe_df_lda.csv", row.names = FALSE)
+write.csv(probe_df_lasso, file = "probe_df_lasso.csv", row.names = FALSE)
+
+```
+
+
+#PathFindR -NETWORK ANALYSIS
+```{r}
+probe_df_rf<- read.csv("probe_df_rf.csv")
+probe_df_lda<- read.csv("probe_df_lda.csv")
+probe_df_lasso <- read.csv("probe_df_lasso.csv")
+
+
+lda_upregulated <- probe_df_lda[probe_df_lda$logFC > 0, ]
+lda_downregulated <- probe_df_lda[probe_df_lda$logFC < 0, ]
+
+# Divide LASSO dataset
+lasso_upregulated <- probe_df_lasso[probe_df_lasso$logFC > 0, ]
+lasso_downregulated <- probe_df_lasso[probe_df_lasso$logFC < 0, ]
+
+# Optional: Check how many genes in each group
+cat("LDA Upregulated:", nrow(lda_upregulated), "\n")
+cat("LDA Downregulated:", nrow(lda_downregulated), "\n")
+cat("LASSO Upregulated:", nrow(lasso_upregulated), "\n")
+cat("LASSO Downregulated:", nrow(lasso_downregulated), "\n")
+
+
+
+# Pathway enrichment
+#Path_200_rf <- run_pathfindR(probe_df_rf, iterations = 10 )
+
+Path_200_lda_up <- run_pathfindR(lda_upregulated, iterations = 10 )
+
+Path_200_lda_down <- run_pathfindR(lda_downregulated, iterations = 10)
+Path_200_lda <- run_pathfindR(probe_df_lda, iterations = 10 )
+
+# Pathway enrichment for LASSO
+Path_200_lasso<- run_pathfindR(probe_df_lasso, iterations = 10 )
+Path_200_lasso_up <- run_pathfindR(lasso_upregulated, iterations = 10 )
+Path_200_lasso_down <- run_pathfindR(lasso_downregulated, iterations = 10 )
+
+lda_vs_lasso_up <- combine_pathfindR_results(
+  result_A = Path_200_lda,
+  result_B = Path_200_lasso,
+  plot_common = TRUE
+)
+
+
+combined_results_graph(lda_vs_lasso_up)
+
+#head(Path_200_rf)
+#head(Path_200_lda)
+```
+
+
+```{r}
+# Cluster enriched terms
+#rf_clu <- cluster_enriched_terms(Path_200_rf)
+lda_clu2 <- cluster_enriched_terms(Path_200_lda_up)
+lda_clu3 <- cluster_enriched_terms(Path_200_lda_down)
+
+lasso_clu <- cluster_enriched_terms(Path_lasso)
+
+
+# Term-gene graph
+#term_gene_graph(rf_clu)
+term_gene_graph(lda_clu2)
+term_gene_graph(lda_clu3)
+term_gene_graph(lasso_clu)
+
+
+# Alternative analysis with Reactome
+#Path_200_rf_2 <- run_pathfindR(probe_df_rf,  # Using your data, not example
+                         #gene_sets = "Reactome",
+                         #pin_name_path = "GeneMania")
+Path_200_lda_2 <-run_pathfindR(lda_upregulated,  # Using your data, not example
+                         gene_sets = "Reactome",
+                         pin_name_path = "GeneMania",
+                         output_dir = "~/Trento/UNI/Advanced Data Analysis -Lauria/results23")
+Path_200_lda_2 <-run_pathfindR(lda_downregulated,  # Using your data, not example
+                         gene_sets = "Reactome",
+                         pin_name_path = "GeneMania" , output_dir ="~/Trento/UNI/Advanced Data Analysis -Lauria/results22")
+path_lasso <- run_pathfindR(probe_df_lasso,  # Using your data, not example
+                         gene_sets = "Reactome",
+                         pin_name_path = "GeneMania")
+
+
+head(Path_200_rf_2)
+head(Path_200_lda_2)
+head(path_lasso)
+```
+
+
+
+```{r}
+# Create vectors for PC numbers and proportion of variance
+pc_numbers <- 1:83
+prop_var <- c(0.1217, 0.08329, 0.04621, 0.03952, 0.0313, 0.02674, 0.02226, 
+              0.02142, 0.02064, 0.01799, 0.01728, 0.01601, 0.01552, 0.01454, 
+              0.01385, 0.01328, 0.01277, 0.01219, 0.01182, 0.0116, 0.01143, 
+              0.0114, 0.01092, 0.01058, 0.01044, 0.0103, 0.01007, 0.00997, 
+              0.00969, 0.00944, 0.00926, 0.00922, 0.00901, 0.00884, 0.00858, 
+              0.00845, 0.00837, 0.00813, 0.00813, 0.00797, 0.00775, 0.0077, 
+              0.00753, 0.00747, 0.00736, 0.00722, 0.00706, 0.00693, 0.0069, 
+              0.00675, 0.00664, 0.00649, 0.00635, 0.00627, 0.00621, 0.00601, 
+              0.00596, 0.0059, 0.00585, 0.00579, 0.00569, 0.0056, 0.00556, 
+              0.00544, 0.00536, 0.00529, 0.00521, 0.00513, 0.00499, 0.00495, 
+              0.00488, 0.00481, 0.0047, 0.00465, 0.00455, 0.00454, 0.00442, 
+              0.00435, 0.00411, 0.00395, 0.00387, 0.00374, 0)
+
+# Create the scree plot
+plot(pc_numbers, prop_var, 
+     type = "b", 
+     pch = 19, 
+     col = "black",
+     xlab = "Principal Component", 
+     ylab = "Proportion of Variance Explained",
+     ylim= c(0, 0.20),
+     xlim=c(0, 20),
+     main = "Scree Plot of PCA Variance Explained")
+
+# Add a line indicating the "elbow" point (often around PC1-PC4 in this case)
+abline(v = 3, col = "red", lty = 2)
+
+# Create the scree plot with all x-axis labels
+plot(pc_numbers, prop_var, 
+     type = "b", 
+     pch = 19, 
+     col = "black",
+     xlab = "Principal Component (PC)", 
+     ylab = "Proportion of Variance Explained",
+     ylim = c(0, 0.20),
+     xlim = c(1, 20),  # Start at PC1 (not 0)
+     main = "Scree Plot: Variance Explained by First 20 PCs",
+     xaxt = "n")  # Turn off default x-axis
+
+# Add custom x-axis with all PC labels
+axis(1, at = pc_numbers, labels = pc_numbers, las = 1, cex.axis = 0.8)
+
+# Optional: Add a red line at the "elbow" (e.g., PC4)
+abline(v = 3, col = "red", lty = 2)
+
+# Optional: Add cumulative variance (if needed)
+
+
+```
+
+
+
+
